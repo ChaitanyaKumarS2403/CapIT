@@ -6,9 +6,19 @@ import subprocess
 import shutil
 import importlib.util
 import webbrowser
+import ctypes
 import customtkinter as ctk
 from PIL import Image
 from tkinter import filedialog, messagebox
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 class CapIT(ctk.CTk):
     def __init__(self):
@@ -35,10 +45,12 @@ class CapIT(ctk.CTk):
 
     def set_window_icon(self):
         try:
-            icon_path = os.path.join("images", "translate.ico")
+            # Using resource_path ensures the icon is found inside the EXE
+            icon_path = resource_path(os.path.join("images", "translate.ico"))
             if os.path.exists(icon_path):
                 self.iconbitmap(icon_path)
-        except: pass
+        except: 
+            pass
 
     def setup_ui(self):
         # --- Sidebar ---
@@ -47,7 +59,8 @@ class CapIT(ctk.CTk):
         self.sidebar.grid_rowconfigure(5, weight=1) 
         
         try:
-            logo_img = ctk.CTkImage(Image.open("images/translate.png"), size=(35, 35))
+            logo_path = resource_path(os.path.join("images", "translate.png"))
+            logo_img = ctk.CTkImage(Image.open(logo_path), size=(35, 35))
             self.logo_label = ctk.CTkLabel(self.sidebar, text=" CapIT", image=logo_img, 
                                          compound="left", font=ctk.CTkFont(size=26, weight="bold"))
         except:
@@ -94,7 +107,6 @@ class CapIT(ctk.CTk):
                             font=ctk.CTkFont(size=13), justify="left")
         desc.pack(padx=40, anchor="w", pady=(0, 20))
 
-        # 1. Video Input Card
         f_card = ctk.CTkFrame(self.home_frame, corner_radius=25, border_width=1)
         f_card.pack(padx=40, pady=10, fill="x")
         ctk.CTkLabel(f_card, text="Source Video", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=25, pady=(20, 0))
@@ -105,7 +117,6 @@ class CapIT(ctk.CTk):
         self.file_entry.pack(side="left", fill="x", expand=True, padx=5)
         ctk.CTkButton(entry_row, text="Browse", width=110, height=45, corner_radius=22, fg_color=self.accent_blue, text_color="white", command=self.select_file).pack(side="right", padx=5)
 
-        # 2. Options Card
         s_card = ctk.CTkFrame(self.home_frame, corner_radius=25, border_width=1)
         s_card.pack(padx=40, pady=20, fill="x")
         grid = ctk.CTkFrame(s_card, fg_color="transparent")
@@ -124,12 +135,10 @@ class CapIT(ctk.CTk):
         ctk.CTkRadioButton(radio_row, text="Translate", variable=self.task_choice, value="translate").pack(side="left", padx=10)
         ctk.CTkRadioButton(radio_row, text="Transcribe", variable=self.task_choice, value="transcribe").pack(side="left", padx=10)
 
-        # 3. Execution Area
         self.p_bar = ctk.CTkProgressBar(self.home_frame, height=12, corner_radius=6, progress_color=self.accent_blue)
         self.p_bar.set(0)
         self.p_bar.pack(padx=60, pady=(40, 5), fill="x")
         
-        # REMOVED SLANT: Normal text only
         self.status_lbl = ctk.CTkLabel(self.home_frame, text="System Idle", font=ctk.CTkFont(size=13))
         self.status_lbl.pack(pady=(0, 20))
 
@@ -189,8 +198,6 @@ class CapIT(ctk.CTk):
         gh_btn.pack(pady=20)
 
         ctk.CTkLabel(c_card, text=f"Version: {self.version}", font=ctk.CTkFont(size=12)).pack(side="bottom", pady=(5, 5))
-        
-        # REMOVED SLANT: Normal text for copyrights
         self.copyright_lbl = ctk.CTkLabel(c_card, text="© Copy rights @ Chaitanya Kumar Sathivada", font=ctk.CTkFont(size=12))
         self.copyright_lbl.pack(side="bottom", pady=(5, 10))
 
@@ -282,5 +289,10 @@ class CapIT(ctk.CTk):
             self.stop_btn.configure(state="disabled")
 
 if __name__ == "__main__":
+    # Fix for Taskbar Icon consistency
+    if sys.platform == "win32":
+        myappid = 'chaitanyakumar.capit.app.1000'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    
     app = CapIT()
     app.mainloop()
