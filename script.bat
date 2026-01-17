@@ -1,3 +1,3 @@
 @echo off
-python "%~dp0script.py"
+python "%~dp0capit.py"
 pause
