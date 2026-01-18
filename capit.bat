@@ -1,3 +1,3 @@
 @echo off
 python "%~dp0capit.py"
-pause
+if %errorlevel% neq 0 pause

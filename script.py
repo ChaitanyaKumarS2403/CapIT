@@ -5,7 +5,6 @@ import tempfile
 import subprocess
 import shutil
 import importlib.util
-import ctypes
 import webbrowser
 import customtkinter as ctk
 from PIL import Image
@@ -22,7 +21,7 @@ class CapIT(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.version = "v1.0.0.5"
+        self.version = "v1.0.0.0"
         self.title("CapIT")
         self.geometry("1050x850") 
         self.set_window_icon()
@@ -226,15 +225,15 @@ class CapIT(ctk.CTk):
                 threading.Event().wait(0.5)
 
         def run():
-            import whisper
-            self.is_downloading = True
             try:
+                import whisper
+                self.is_downloading = True
                 threading.Thread(target=monitor_file, args=(self.get_model_path(name), self.model_sizes[name]), daemon=True).start()
                 whisper.load_model(name)
                 self.after(0, lambda: [self.set_model_pbar.set(1.0), self.update_active_model(name), self.refresh_settings_models()])
                 messagebox.showinfo("Success", f"{name.capitalize()} model ready.")
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
+                self.after(0, lambda: messagebox.showerror("Error", f"Model Download Failed: {str(e)}"))
             finally:
                 self.is_downloading = False
                 self.after(1000, lambda: [self.set_model_pbar.set(0), self.set_model_status_lbl.configure(text="Ready")])
@@ -262,19 +261,32 @@ class CapIT(ctk.CTk):
     def manage_deps(self, mode):
         def task():
             self.after(0, lambda: [self.repair_btn.configure(state="disabled"), self.uninst_btn.configure(state="disabled")])
+            info = subprocess.STARTUPINFO()
+            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            info.wShowWindow = subprocess.SW_HIDE
             try:
                 if mode == "install":
-                    subprocess.run("winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements", shell=True)
-                    subprocess.run(f'"{sys.executable}" -m pip install openai-whisper ffmpeg-python', shell=True)
+                    # Install Python Core via Winget
+                    subprocess.run("winget install -e --id Python.Python.3 --accept-source-agreements --accept-package-agreements", 
+                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    # Install FFmpeg via Winget
+                    subprocess.run("winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements", 
+                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    # Install Python Dependencies via Pip
+                    subprocess.run(f'"{sys.executable}" -m pip install openai-whisper ffmpeg-python', 
+                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 else:
-                    subprocess.run("winget uninstall -e --id Gyan.FFmpeg", shell=True)
-                    subprocess.run(f'"{sys.executable}" -m pip uninstall -y openai-whisper ffmpeg-python', shell=True)
+                    # Uninstall FFmpeg
+                    subprocess.run("winget uninstall -e --id Gyan.FFmpeg", shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    # Uninstall Python dependencies (Python Core remains)
+                    subprocess.run(f'"{sys.executable}" -m pip uninstall -y openai-whisper ffmpeg-python', 
+                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
-                # Immediate refresh call
-                self.after(0, self.check_system_health)
+                # Immediate UI Refresh
+                self.check_system_health()
                 self.after(0, lambda: messagebox.showinfo("Success", f"Engines {mode}ed successfully."))
             except Exception as e: 
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
+                self.after(0, lambda: messagebox.showerror("Error", f"Subprocess Error: {str(e)}"))
             finally: 
                 self.after(0, lambda: [self.repair_btn.configure(state="normal"), self.uninst_btn.configure(state="normal")])
         threading.Thread(target=task, daemon=True).start()
@@ -283,7 +295,6 @@ class CapIT(ctk.CTk):
         ff_ok = shutil.which("ffmpeg") is not None
         wh_ok = importlib.util.find_spec("whisper") is not None
         
-        # Update labels immediately
         self.after(0, lambda: [
             self.ff_stat_lbl.configure(text="Active" if ff_ok else "Missing", text_color="green" if ff_ok else self.accent_red),
             self.wh_stat_lbl.configure(text="Active" if wh_ok else "Missing", text_color="green" if wh_ok else self.accent_red),
@@ -292,18 +303,19 @@ class CapIT(ctk.CTk):
                                      text_color="green" if (ff_ok and wh_ok) else self.accent_red)
         ])
         
-        # Keep background loop running every 3 seconds
-        if not hasattr(self, "_health_loop"):
-            self._health_loop = True
+        if not hasattr(self, "_health_loop_active"):
+            self._health_loop_active = True
             self._run_health_loop()
 
     def _run_health_loop(self):
         ff_ok = shutil.which("ffmpeg") is not None
         wh_ok = importlib.util.find_spec("whisper") is not None
-        self.ff_stat_lbl.configure(text="Active" if ff_ok else "Missing", text_color="green" if ff_ok else self.accent_red)
-        self.wh_stat_lbl.configure(text="Active" if wh_ok else "Missing", text_color="green" if wh_ok else self.accent_red)
-        self.health_dot.configure(text="🟢 Engine Ready" if (ff_ok and wh_ok) else "🔴 Engine Missing", 
-                                 text_color="green" if (ff_ok and wh_ok) else self.accent_red)
+        self.after(0, lambda: [
+            self.ff_stat_lbl.configure(text="Active" if ff_ok else "Missing", text_color="green" if ff_ok else self.accent_red),
+            self.wh_stat_lbl.configure(text="Active" if wh_ok else "Missing", text_color="green" if wh_ok else self.accent_red),
+            self.health_dot.configure(text="🟢 Engine Ready" if (ff_ok and wh_ok) else "🔴 Engine Missing", 
+                                     text_color="green" if (ff_ok and wh_ok) else self.accent_red)
+        ])
         self.after(3000, self._run_health_loop)
 
     def delete_model(self, name):
@@ -322,28 +334,28 @@ class CapIT(ctk.CTk):
         threading.Thread(target=self.process_engine, daemon=True).start()
 
     def process_engine(self):
+        temp_path = os.path.join(tempfile.gettempdir(), "capit_audio.wav")
         try:
             import whisper, ffmpeg
             from whisper.utils import format_timestamp
-            temp_path = os.path.join(tempfile.gettempdir(), "capit_audio.wav")
-            self.after(0, lambda: [self.status_lbl.configure(text="Extracting Audio..."), self.p_bar.set(0.05)])
+            self.after(0, lambda: [self.status_lbl.configure(text="Extracting Audio..."), self.p_bar.set(0.10)])
             ffmpeg.input(self.video_path.get()).output(temp_path, acodec="pcm_s16le", ac=1, ar="16000").overwrite_output().run(quiet=True)
-            self.after(0, lambda: [self.status_lbl.configure(text="Loading AI Model..."), self.p_bar.set(0.15)])
+            self.after(0, lambda: [self.status_lbl.configure(text="Loading AI Model..."), self.p_bar.set(0.25)])
             model = whisper.load_model(self.model_choice.get())
-            self.after(0, lambda: self.status_lbl.configure(text="Processing AI Captions..."))
+            self.after(0, lambda: self.status_lbl.configure(text="AI Processing..."))
             probe = ffmpeg.probe(self.video_path.get())
             total_duration = float(probe['format']['duration'])
             result = model.transcribe(temp_path, task=self.task_choice.get())
             out_file = os.path.splitext(self.video_path.get())[0] + ".srt"
             with open(out_file, "w", encoding="utf-8") as f:
                 for i, seg in enumerate(result["segments"], 1):
-                    current_progress = 0.2 + (0.8 * (seg['end'] / total_duration))
-                    self.after(0, lambda v=current_progress: self.p_bar.set(v))
+                    progress = 0.3 + (0.7 * (seg['end'] / total_duration))
+                    self.after(0, lambda v=progress: self.p_bar.set(v))
                     f.write(f"{i}\n{format_timestamp(seg['start'])} --> {format_timestamp(seg['end'])}\n{seg['text'].strip()}\n\n")
             self.after(0, lambda: [self.p_bar.set(1.0), self.status_lbl.configure(text="Complete!")])
-            messagebox.showinfo("Done", "Captions Created Successfully.")
+            messagebox.showinfo("Done", f"Captions saved to: {out_file}")
         except Exception as e: 
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
+            self.after(0, lambda: messagebox.showerror("Error", f"Processing Failed: {str(e)}"))
         finally: 
             if os.path.exists(temp_path): os.remove(temp_path)
             self.after(1000, lambda: [self.p_bar.set(0), self.status_lbl.configure(text="System Idle"), self.start_btn.configure(state="normal")])
@@ -368,8 +380,7 @@ class CapIT(ctk.CTk):
         ctk.CTkLabel(c_card, text="Chaitanya Kumar Sathivada", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=5)
         ctk.CTkButton(c_card, text="View GitHub Profile", fg_color="transparent", border_width=1, command=lambda: webbrowser.open("https://github.com/ChaitanyaKumarS2403")).pack(pady=20)
         ctk.CTkLabel(c_card, text=f"Version: {self.version}", font=ctk.CTkFont(size=12)).pack(side="bottom", pady=(5, 5))
-        self.copyright_lbl = ctk.CTkLabel(c_card, text="© Copy rights @ Chaitanya Kumar Sathivada", font=ctk.CTkFont(size=12))
-        self.copyright_lbl.pack(side="bottom", pady=(5, 10))
+        ctk.CTkLabel(c_card, text="© Copyrights @ Chaitanya Kumar Sathivada", font=ctk.CTkFont(size=12)).pack(side="bottom", pady=(5, 10))
 
     def select_file(self):
         path = filedialog.askopenfilename(filetypes=[("Videos", "*.mp4 *.mkv *.avi *.mov")])
