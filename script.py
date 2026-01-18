@@ -62,6 +62,12 @@ class CapIT(ctk.CTk):
                 return full_path
         return os.path.join(base_dir, f"{model_name}.pt")
 
+    def update_active_model(self, m_name):
+        self.model_choice.set(m_name)
+        if hasattr(self, 'active_model_pill'):
+            display_text = m_name.upper() if m_name != "none" else "NONE (Check Settings)"
+            self.active_model_pill.configure(text=display_text, fg_color=self.accent_blue if m_name != "none" else self.accent_red)
+
     def auto_select_best_model(self):
         selected = "none"
         for m in self.model_priority:
@@ -69,12 +75,26 @@ class CapIT(ctk.CTk):
                 selected = m
                 break
         self.update_active_model(selected)
+        self.refresh_settings_models()
 
-    def update_active_model(self, m_name):
-        self.model_choice.set(m_name)
-        if hasattr(self, 'active_model_pill'):
-            display_text = m_name.upper() if m_name != "none" else "NONE (Check Settings)"
-            self.active_model_pill.configure(text=display_text, fg_color=self.accent_blue if m_name != "none" else self.accent_red)
+    def refresh_settings_models(self):
+        if not hasattr(self, 'model_box'): return
+        for widget in self.model_box.winfo_children(): widget.destroy()
+        for m in self.model_priority:
+            path = self.get_model_path(m)
+            exists = os.path.exists(path)
+            row = ctk.CTkFrame(self.model_box, fg_color=("gray85", "gray20") if self.model_choice.get() == m else "transparent", corner_radius=12)
+            row.pack(fill="x", pady=3)
+            ctk.CTkLabel(row, text=m.upper(), width=100, anchor="w", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=15, pady=8)
+            ctk.CTkLabel(row, text="Downloaded" if exists else "Not Installed", text_color="#2ecc71" if exists else "orange", width=150, anchor="w").pack(side="left")
+            btn_c = ctk.CTkFrame(row, fg_color="transparent")
+            btn_c.pack(side="right", padx=10)
+            if not exists:
+                ctk.CTkButton(btn_c, text="Install", width=80, height=28, command=lambda n=m: self.download_model(n)).pack(side="left")
+            else:
+                if self.model_choice.get() != m:
+                    ctk.CTkButton(btn_c, text="Activate", width=80, height=28, fg_color=self.accent_blue, command=lambda n=m: [self.update_active_model(n), self.refresh_settings_models()]).pack(side="left", padx=2)
+                ctk.CTkButton(btn_c, text="Delete", width=80, height=28, fg_color="transparent", border_width=1, border_color=self.accent_red, text_color=self.accent_red, command=lambda n=m: self.delete_model(n)).pack(side="left", padx=2)
 
     def change_appearance_mode(self, mode):
         ctk.set_appearance_mode(mode)
@@ -191,6 +211,7 @@ class CapIT(ctk.CTk):
         ctk.CTkLabel(d_card, text="System Engines", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=30, pady=15)
         self.dep_container = ctk.CTkFrame(d_card, fg_color="transparent")
         self.dep_container.pack(fill="x", padx=30, pady=(0, 20))
+        
         for engine, attr in [("FFmpeg (Winget):", "ff"), ("Whisper AI (Pip):", "wh"), ("Python Core:", "py")]:
             row = ctk.CTkFrame(self.dep_container, fg_color="transparent")
             row.pack(fill="x", pady=2)
@@ -205,6 +226,28 @@ class CapIT(ctk.CTk):
         self.repair_btn.pack(side="left", padx=5)
         self.uninst_btn = ctk.CTkButton(btn_row, text="Uninstall Engines", height=45, corner_radius=22, fg_color="transparent", border_width=1, border_color=self.accent_red, text_color=self.accent_red, command=lambda: self.manage_deps("uninstall"))
         self.uninst_btn.pack(side="left", padx=5)
+
+    def manage_deps(self, mode):
+        def task():
+            self.after(0, lambda: [self.repair_btn.configure(state="disabled"), self.uninst_btn.configure(state="disabled")])
+            info = subprocess.STARTUPINFO()
+            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            info.wShowWindow = subprocess.SW_HIDE
+            try:
+                if mode == "install":
+                    subprocess.run("winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements", shell=True, startupinfo=info)
+                    subprocess.run(f'"{sys.executable}" -m pip install openai-whisper ffmpeg-python', shell=True, startupinfo=info)
+                else:
+                    subprocess.run("winget uninstall -e --id Gyan.FFmpeg", shell=True, startupinfo=info)
+                    subprocess.run(f'"{sys.executable}" -m pip uninstall -y openai-whisper ffmpeg-python', shell=True, startupinfo=info)
+                
+                # REFRESH IMMEDIATELY after task completes
+                self.after(0, lambda: [self.check_system_health(), self.refresh_settings_models(), messagebox.showinfo("Success", f"Engines {mode}ed successfully.")])
+            except Exception as e: 
+                self.after(0, lambda: messagebox.showerror("Error", str(e)))
+            finally: 
+                self.after(0, lambda: [self.repair_btn.configure(state="normal"), self.uninst_btn.configure(state="normal")])
+        threading.Thread(target=task, daemon=True).start()
 
     def download_model(self, name):
         def monitor_file(target_path, total_size_mb):
@@ -225,97 +268,39 @@ class CapIT(ctk.CTk):
                 threading.Event().wait(0.5)
 
         def run():
+            # Set this BEFORE starting monitor
+            self.is_downloading = True
             try:
                 import whisper
-                self.is_downloading = True
-                threading.Thread(target=monitor_file, args=(self.get_model_path(name), self.model_sizes[name]), daemon=True).start()
+                path = self.get_model_path(name)
+                # Ensure parent directory exists for monitor
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                threading.Thread(target=monitor_file, args=(path, self.model_sizes[name]), daemon=True).start()
                 whisper.load_model(name)
-                self.after(0, lambda: [self.set_model_pbar.set(1.0), self.update_active_model(name), self.refresh_settings_models()])
-                messagebox.showinfo("Success", f"{name.capitalize()} model ready.")
+                self.after(0, lambda: [self.set_model_pbar.set(1), self.update_active_model(name), self.refresh_settings_models()])
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", f"Model Download Failed: {str(e)}"))
+                self.after(0, lambda: messagebox.showerror("Error", str(e)))
             finally:
                 self.is_downloading = False
-                self.after(1000, lambda: [self.set_model_pbar.set(0), self.set_model_status_lbl.configure(text="Ready")])
-        
+                self.after(0, lambda: [self.set_model_status_lbl.configure(text="Ready"), self.set_model_pbar.set(0)])
+
         threading.Thread(target=run, daemon=True).start()
-
-    def refresh_settings_models(self):
-        for widget in self.model_box.winfo_children(): widget.destroy()
-        for m in self.model_priority:
-            path = self.get_model_path(m)
-            exists = os.path.exists(path)
-            row = ctk.CTkFrame(self.model_box, fg_color=("gray85", "gray20") if self.model_choice.get() == m else "transparent", corner_radius=12)
-            row.pack(fill="x", pady=3)
-            ctk.CTkLabel(row, text=m.upper(), width=100, anchor="w", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=15, pady=8)
-            ctk.CTkLabel(row, text="Downloaded" if exists else "Not Installed", text_color="#2ecc71" if exists else "orange", width=150, anchor="w").pack(side="left")
-            btn_c = ctk.CTkFrame(row, fg_color="transparent")
-            btn_c.pack(side="right", padx=10)
-            if not exists:
-                ctk.CTkButton(btn_c, text="Install", width=80, height=28, command=lambda n=m: self.download_model(n)).pack(side="left")
-            else:
-                if self.model_choice.get() != m:
-                    ctk.CTkButton(btn_c, text="Activate", width=80, height=28, fg_color=self.accent_blue, command=lambda n=m: [self.update_active_model(n), self.refresh_settings_models()]).pack(side="left", padx=2)
-                ctk.CTkButton(btn_c, text="Delete", width=80, height=28, fg_color="transparent", border_width=1, border_color=self.accent_red, text_color=self.accent_red, command=lambda n=m: self.delete_model(n)).pack(side="left", padx=2)
-
-    def manage_deps(self, mode):
-        def task():
-            self.after(0, lambda: [self.repair_btn.configure(state="disabled"), self.uninst_btn.configure(state="disabled")])
-            info = subprocess.STARTUPINFO()
-            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            info.wShowWindow = subprocess.SW_HIDE
-            try:
-                if mode == "install":
-                    # Install Python Core via Winget
-                    subprocess.run("winget install -e --id Python.Python.3 --accept-source-agreements --accept-package-agreements", 
-                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    # Install FFmpeg via Winget
-                    subprocess.run("winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements", 
-                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    # Install Python Dependencies via Pip
-                    subprocess.run(f'"{sys.executable}" -m pip install openai-whisper ffmpeg-python', 
-                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                else:
-                    # Uninstall FFmpeg
-                    subprocess.run("winget uninstall -e --id Gyan.FFmpeg", shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    # Uninstall Python dependencies (Python Core remains)
-                    subprocess.run(f'"{sys.executable}" -m pip uninstall -y openai-whisper ffmpeg-python', 
-                                 shell=True, startupinfo=info, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                
-                # Immediate UI Refresh
-                self.check_system_health()
-                self.after(0, lambda: messagebox.showinfo("Success", f"Engines {mode}ed successfully."))
-            except Exception as e: 
-                self.after(0, lambda: messagebox.showerror("Error", f"Subprocess Error: {str(e)}"))
-            finally: 
-                self.after(0, lambda: [self.repair_btn.configure(state="normal"), self.uninst_btn.configure(state="normal")])
-        threading.Thread(target=task, daemon=True).start()
 
     def check_system_health(self):
         ff_ok = shutil.which("ffmpeg") is not None
         wh_ok = importlib.util.find_spec("whisper") is not None
-        
         self.after(0, lambda: [
             self.ff_stat_lbl.configure(text="Active" if ff_ok else "Missing", text_color="green" if ff_ok else self.accent_red),
             self.wh_stat_lbl.configure(text="Active" if wh_ok else "Missing", text_color="green" if wh_ok else self.accent_red),
             self.py_stat_lbl.configure(text="Active", text_color="green"),
-            self.health_dot.configure(text="🟢 Engine Ready" if (ff_ok and wh_ok) else "🔴 Engine Missing", 
-                                     text_color="green" if (ff_ok and wh_ok) else self.accent_red)
+            self.health_dot.configure(text="🟢 Engine Ready" if (ff_ok and wh_ok) else "🔴 Engine Missing", text_color="green" if (ff_ok and wh_ok) else self.accent_red)
         ])
-        
         if not hasattr(self, "_health_loop_active"):
             self._health_loop_active = True
             self._run_health_loop()
 
     def _run_health_loop(self):
-        ff_ok = shutil.which("ffmpeg") is not None
-        wh_ok = importlib.util.find_spec("whisper") is not None
-        self.after(0, lambda: [
-            self.ff_stat_lbl.configure(text="Active" if ff_ok else "Missing", text_color="green" if ff_ok else self.accent_red),
-            self.wh_stat_lbl.configure(text="Active" if wh_ok else "Missing", text_color="green" if wh_ok else self.accent_red),
-            self.health_dot.configure(text="🟢 Engine Ready" if (ff_ok and wh_ok) else "🔴 Engine Missing", 
-                                     text_color="green" if (ff_ok and wh_ok) else self.accent_red)
-        ])
+        self.check_system_health()
         self.after(3000, self._run_health_loop)
 
     def delete_model(self, name):
@@ -355,7 +340,7 @@ class CapIT(ctk.CTk):
             self.after(0, lambda: [self.p_bar.set(1.0), self.status_lbl.configure(text="Complete!")])
             messagebox.showinfo("Done", f"Captions saved to: {out_file}")
         except Exception as e: 
-            self.after(0, lambda: messagebox.showerror("Error", f"Processing Failed: {str(e)}"))
+            self.after(0, lambda: messagebox.showerror("Error", str(e)))
         finally: 
             if os.path.exists(temp_path): os.remove(temp_path)
             self.after(1000, lambda: [self.p_bar.set(0), self.status_lbl.configure(text="System Idle"), self.start_btn.configure(state="normal")])
