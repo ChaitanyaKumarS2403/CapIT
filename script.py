@@ -46,7 +46,7 @@ class CapIT(ctk.CTk):
 
     def set_window_icon(self):
         try:
-            icon_path = resource_path(os.path.join("images", "translate.ico"))
+            icon_path = resource_path(os.path.join("images", "capit-logo.ico"))
             if os.path.exists(icon_path):
                 self.iconbitmap(icon_path)
         except: pass
@@ -91,7 +91,7 @@ class CapIT(ctk.CTk):
         self.sidebar.grid_rowconfigure(5, weight=1) 
         
         try:
-            logo_path = resource_path(os.path.join("images", "translate.png"))
+            logo_path = resource_path(os.path.join("images", "capit-logo.png"))
             logo_img = ctk.CTkImage(Image.open(logo_path), size=(35, 35))
             self.logo_label = ctk.CTkLabel(self.sidebar, text=" CapIT", image=logo_img, compound="left", font=ctk.CTkFont(size=26, weight="bold"))
         except:
